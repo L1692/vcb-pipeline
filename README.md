@@ -1,6 +1,6 @@
 # VCB Pipeline
 
-![CI](https://github.com/<you>/vcb-pipeline/actions/workflows/ci.yml/badge.svg)
+![CI](https://github.com/L1692/vcb-pipeline/actions/workflows/ci.yml/badge.svg)
 
 An ETL-style backtesting pipeline for validating trading strategies under
 **prop-firm constraints** (daily loss limits, max drawdown, profit targets),
@@ -53,7 +53,7 @@ the right one:
 ## Install
 
 ```bash
-git clone https://github.com/<you>/vcb-pipeline.git
+git clone https://github.com/L1692/vcb-pipeline.git
 cd vcb-pipeline
 pip install -e ".[yahoo,dev]"
 pytest            # 7 tests, synthetic data, no network required
