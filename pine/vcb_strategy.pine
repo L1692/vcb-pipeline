@@ -1,0 +1,145 @@
+//@version=6
+// ─────────────────────────────────────────────────────────────────────────────
+// VCB v2 — Volatility Compression Breakout [Prop Edition]
+// Logica: due trigger. A) rilascio dello "squeeze" (BB dentro KC);
+// B) flip del momentum mentre lo squeeze è attivo (opzionale).
+// Direzione dal momentum (linreg), filtro trend EMA opzionale.
+// Config validata dal backtest di portafoglio (vcb_portfolio.py v2.1):
+//   grafico su 2H — DAX, NASDAQ, XAUUSD — trend EMA 100 — rischio 1.0% —
+//   flip attivo. NIKKEI e SP500 esclusi (edge assente, crowding-out).
+// NB: lo stop giornaliero qui è per-strumento; il limite -3% della prop è
+// sull'account. Con 3 grafici attivi tieni un margine manuale, oppure usa
+// il backtest Python (equity condivisa) come riferimento per il sizing.
+// Risk management integrato per challenge prop:
+//   - rischio fisso % per trade (size da stop ATR)
+//   - stop giornaliero software (buffer sotto il -3%)
+//   - kill switch account (buffer sotto il -10%)
+//   - halt al raggiungimento del target +10%
+// Timeframe consigliato: 4H (NIKKEI: provare anche 6H / D).
+// ─────────────────────────────────────────────────────────────────────────────
+strategy("VCB — Volatility Compression Breakout [Prop]",
+     overlay                 = true,
+     initial_capital         = 100000,
+     currency                = currency.USD,
+     pyramiding              = 0,
+     calc_on_every_tick      = false,
+     process_orders_on_close = true,
+     commission_type         = strategy.commission.percent,
+     commission_value        = 0.02,
+     slippage                = 2)
+
+// ── Input: setup ─────────────────────────────────────────────────────────────
+grpS       = "Setup"
+startDate  = input.time(timestamp("2026-01-01T00:00:00"), "Inizio backtest", group = grpS)
+lenBB      = input.int(20,    "Lunghezza BB/KC",       minval = 5,  group = grpS)
+multBB     = input.float(2.0, "Moltiplicatore BB",     step = 0.1,  group = grpS)
+multKC     = input.float(1.5, "Moltiplicatore KC",     step = 0.1,  group = grpS)
+useTrend   = input.bool(true, "Filtro trend EMA",                   group = grpS)
+lenTrend   = input.int(100,   "Lunghezza EMA trend",   minval = 20, group = grpS)
+useFlip    = input.bool(true, "Trigger B: flip momentum in squeeze", group = grpS)
+
+// ── Input: rischio ───────────────────────────────────────────────────────────
+grpR       = "Rischio"
+riskPct    = input.float(0.8, "Rischio per trade (%)",  step = 0.1, group = grpR) / 100
+atrLen     = input.int(14,    "Lunghezza ATR",                      group = grpR)
+slMult     = input.float(2.0, "Stop Loss (x ATR)",      step = 0.1, group = grpR)
+tpMult     = input.float(3.5, "Take Profit (x ATR)",    step = 0.1, group = grpR)
+useTrail   = input.bool(true, "Trailing chandelier",                group = grpR)
+trailMult  = input.float(3.0, "Trailing (x ATR)",       step = 0.1, group = grpR)
+
+// ── Input: vincoli prop ──────────────────────────────────────────────────────
+grpP         = "Vincoli prop firm"
+dailyLossPct = input.float(2.5, "Stop giornaliero (%)",    step = 0.1, group = grpP) / 100
+maxDDPct     = input.float(5.0, "Kill switch account (%)", step = 0.5, group = grpP) / 100  // SwiftTrader: DD totale 6%, buffer a 5
+targetPct    = input.float(10.0,"Obiettivo P&L (%)",       step = 0.5, group = grpP) / 100
+
+// ── Indicatori ───────────────────────────────────────────────────────────────
+basis    = ta.sma(close, lenBB)
+dev      = multBB * ta.stdev(close, lenBB)
+upperBB  = basis + dev
+lowerBB  = basis - dev
+
+rangeKC  = multKC * ta.sma(ta.tr, lenBB)
+upperKC  = basis + rangeKC
+lowerKC  = basis - rangeKC
+
+sqzOn      = lowerBB > lowerKC and upperBB < upperKC
+sqzRelease = sqzOn[1] and not sqzOn          // rilascio dello squeeze
+
+mid = math.avg(math.avg(ta.highest(high, lenBB), ta.lowest(low, lenBB)), ta.sma(close, lenBB))
+val = ta.linreg(close - mid, lenBB, 0)       // momentum stile TTM
+
+emaTrend = ta.ema(close, lenTrend)
+atr      = ta.atr(atrLen)
+
+// ── Guardie prop firm ────────────────────────────────────────────────────────
+var float dayStartEquity = strategy.initial_capital
+isNewDay = ta.change(time("D")) != 0
+if isNewDay
+    dayStartEquity := strategy.equity
+
+dailyPnL    = dayStartEquity > 0 ? (strategy.equity - dayStartEquity) / dayStartEquity : 0.0
+dailyHalt   = dailyPnL <= -dailyLossPct
+accountHalt = strategy.equity <= strategy.initial_capital * (1 - maxDDPct)
+targetHit   = strategy.equity >= strategy.initial_capital * (1 + targetPct)
+
+canTrade = time >= startDate and not dailyHalt and not accountHalt and not targetHit
+
+if (dailyHalt or accountHalt or targetHit) and strategy.position_size != 0
+    strategy.close_all(comment = accountHalt ? "KILL SWITCH" : targetHit ? "TARGET +10%" : "DAILY STOP")
+
+// ── Segnali ──────────────────────────────────────────────────────────────────
+// Trigger A: rilascio dello squeeze. Trigger B: flip del momentum (val
+// attraversa lo zero) mentre lo squeeze è ancora attivo — stessa logica
+// del backtest Python v2.1, per parità backtest/live.
+flipUp  = sqzOn and val > 0 and val[1] <= 0
+flipDn  = sqzOn and val < 0 and val[1] >= 0
+longRaw  = (sqzRelease and val > 0) or (useFlip and flipUp)
+shortRaw = (sqzRelease and val < 0) or (useFlip and flipDn)
+longSignal  = longRaw  and (not useTrend or close > emaTrend)
+shortSignal = shortRaw and (not useTrend or close < emaTrend)
+
+// ── Ingressi con position sizing da rischio fisso ────────────────────────────
+if canTrade and strategy.position_size == 0 and not na(atr) and atr > 0
+    stopDist = atr * slMult
+    qty      = strategy.equity * riskPct / stopDist
+    if longSignal and qty > 0
+        strategy.entry("L", strategy.long, qty = qty)
+        strategy.exit("L-X", "L", stop = close - stopDist, limit = close + atr * tpMult)
+    if shortSignal and qty > 0
+        strategy.entry("S", strategy.short, qty = qty)
+        strategy.exit("S-X", "S", stop = close + stopDist, limit = close - atr * tpMult)
+
+// ── Trailing chandelier (ratchet) ────────────────────────────────────────────
+var float trailStop = na
+if strategy.position_size > 0
+    ts = high - atr * trailMult
+    trailStop := na(trailStop) ? ts : math.max(trailStop, ts)
+    if useTrail and close < trailStop
+        strategy.close("L", comment = "Trail")
+else if strategy.position_size < 0
+    ts = low + atr * trailMult
+    trailStop := na(trailStop) ? ts : math.min(trailStop, ts)
+    if useTrail and close > trailStop
+        strategy.close("S", comment = "Trail")
+else
+    trailStop := na
+
+// ── Grafica ──────────────────────────────────────────────────────────────────
+plot(emaTrend, "EMA trend", color = color.new(color.orange, 30))
+plot(strategy.position_size != 0 ? trailStop : na, "Trailing", color = color.new(color.fuchsia, 0), style = plot.style_linebr)
+bgcolor(sqzOn ? color.new(color.yellow, 88) : na, title = "Squeeze attivo")
+bgcolor(dailyHalt ? color.new(color.red, 85) : na, title = "Stop giornaliero")
+
+// ── Pannello di stato ────────────────────────────────────────────────────────
+var table panel = table.new(position.top_right, 2, 4, border_width = 1)
+if barstate.islast
+    stato = accountHalt ? "KILL SWITCH" : targetHit ? "TARGET RAGGIUNTO" : dailyHalt ? "STOP GIORNALIERO" : "ATTIVA"
+    table.cell(panel, 0, 0, "Stato",        text_color = color.white, bgcolor = color.gray)
+    table.cell(panel, 1, 0, stato,          text_color = color.white, bgcolor = accountHalt ? color.red : targetHit ? color.green : color.blue)
+    table.cell(panel, 0, 1, "Equity",       text_color = color.white, bgcolor = color.gray)
+    table.cell(panel, 1, 1, str.tostring(strategy.equity, "#.##"), text_color = color.white, bgcolor = color.blue)
+    table.cell(panel, 0, 2, "P&L oggi",     text_color = color.white, bgcolor = color.gray)
+    table.cell(panel, 1, 2, str.tostring(dailyPnL * 100, "#.##") + "%", text_color = color.white, bgcolor = dailyPnL < 0 ? color.maroon : color.teal)
+    table.cell(panel, 0, 3, "P&L totale",   text_color = color.white, bgcolor = color.gray)
+    table.cell(panel, 1, 3, str.tostring((strategy.equity / strategy.initial_capital - 1) * 100, "#.##") + "%", text_color = color.white, bgcolor = color.navy)

@@ -1,0 +1,22 @@
+[project]
+name = "vcb-pipeline"
+version = "1.0.0"
+description = "ETL-style backtesting pipeline for prop-firm trading strategies (Volatility Compression Breakout)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = ["pandas>=2.0", "numpy>=1.24"]
+
+[project.optional-dependencies]
+yahoo = ["yfinance>=0.2"]
+dev = ["pytest>=7"]
+
+[project.scripts]
+vcb = "vcb.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
