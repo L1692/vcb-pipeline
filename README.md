@@ -115,7 +115,7 @@ data/            # your CSV exports (git-ignored)
 ## Roadmap
 
 - GitHub Actions CI (pytest on push)
-- Strategy plug-in interface (second strategy: trend-following on indices)
+- ~~Strategy plug-in interface~~ done: see `strategies.py` (a second strategy, TPB, was implemented and rejected on out-of-sample evidence — negative results count)
 - Direct MT5 ingestion via the `MetaTrader5` package (Windows)
 - Rolling multi-window walk-forward
 

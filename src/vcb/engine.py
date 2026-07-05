@@ -168,12 +168,17 @@ def portfolio_backtest(data: dict[str, pd.DataFrame], p: dict, t0, t1) -> Result
             r = rows[name].get(t)
             if r is None or r.atr <= 0:
                 continue
-            flip_up = r.sqz_on and r.val > 0 >= r.val_prev
-            flip_dn = r.sqz_on and r.val < 0 <= r.val_prev
-            long_raw = (r.release and r.val > 0) or (p["use_flip"] and flip_up)
-            short_raw = (r.release and r.val < 0) or (p["use_flip"] and flip_dn)
-            go_long = long_raw and (p["trend_len"] == 0 or r.Close > r.ema)
-            go_short = short_raw and (p["trend_len"] == 0 or r.Close < r.ema)
+            if hasattr(r, "go_long"):
+                # strategy plug-in path: signals precomputed in the transform layer
+                go_long, go_short = bool(r.go_long), bool(r.go_short)
+            else:
+                # built-in VCB signal logic
+                flip_up = r.sqz_on and r.val > 0 >= r.val_prev
+                flip_dn = r.sqz_on and r.val < 0 <= r.val_prev
+                long_raw = (r.release and r.val > 0) or (p["use_flip"] and flip_up)
+                short_raw = (r.release and r.val < 0) or (p["use_flip"] and flip_dn)
+                go_long = long_raw and (p["trend_len"] == 0 or r.Close > r.ema)
+                go_short = short_raw and (p["trend_len"] == 0 or r.Close < r.ema)
             if not (go_long or go_short):
                 continue
             side = 1 if go_long else -1

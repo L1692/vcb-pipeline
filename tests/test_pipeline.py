@@ -121,3 +121,19 @@ def test_summarize_challenge_fields(prepared):
     out = summarize(portfolio_backtest(prepared, p, lo, hi), p)
     assert {"ch_ok", "ch_ko", "med_months"} <= set(out)
     assert "P&L%" not in out          # truncated P&L is hidden in challenge mode
+
+
+# -- strategies (plug-in path) --------------------------------------------------
+
+def test_tpb_signals_and_backtest():
+    from vcb.strategies import prepare_tpb
+    data = {n: prepare_tpb(synthetic_ohlc(s)) for n, s in (("A", 1), ("B", 2))}
+    for df in data.values():
+        assert {"go_long", "go_short", "atr"} <= set(df.columns)
+        assert not (df["go_long"] & df["go_short"]).any()
+    lo, hi = _span(data)
+    p = {"risk": 0.01, "challenge": True, "strategy": "TPB"}
+    res = portfolio_backtest(data, p, lo, hi)
+    assert len(res.trades) > 5
+    out = summarize(res, p)
+    assert out["strat"] == "TPB"

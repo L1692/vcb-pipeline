@@ -22,11 +22,12 @@ def summarize(res: Result, p: dict) -> dict:
     pf = (sum(wins) / abs(sum(losses))) if losses and sum(losses) != 0 else float("inf")
     final = eq.iloc[-1] if len(eq) else CAPITAL
     out = {
+        "strat": p.get("strategy", "VCB"),
         "tf": p.get("tf", "-"),
-        "multKC": p["mult_kc"],
-        "trend": p["trend_len"],
+        "multKC": p.get("mult_kc", "-"),
+        "trend": p.get("trend_len", "-"),
         "risk%": round(p["risk"] * 100, 2),
-        "flip": "yes" if p["use_flip"] else "no",
+        "flip": "yes" if p.get("use_flip") else "no",
         "stress": "yes" if p.get("slip_atr", 0.0) > 0 else "no",
         "trades": len(tr),
         "win%": round(100 * len(wins) / len(tr), 1) if tr else 0.0,
